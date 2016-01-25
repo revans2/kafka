@@ -33,11 +33,14 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 /**
  * A set of tests for the selector. These use a test harness that runs a simple socket server that echos back responses.
  */
 public class SslSelectorTest extends SelectorTest {
-
+    private final Logger log = LoggerFactory.getLogger(getClass());
     private Metrics metrics;
     private Map<String, Object> sslClientConfigs;
 
@@ -98,12 +101,22 @@ public class SslSelectorTest extends SelectorTest {
             while (!selector.isChannelReady(node)) {
                 selector.poll(1000L);
             }
+            log.info("SEND {}-{}", node, requests);
             selector.send(createSend(node, node + "-" + 0));
             requests++;
 
-            // loop until we complete all requests
+            // loop until we complete all requests or a timeout happens
+            long start = System.currentTimeMillis();
+            boolean extra = false;
             while (responses < reqs) {
-                selector.poll(0L);
+                if ((System.currentTimeMillis() - start) > 15000 && !extra) {
+                    //15 seconds passed, lets try to unjam things
+                    log.info("SEND {}-{}-EXTRA", node, requests);
+                    selector.send(createSend(node, node + "-" + requests + "-EXTRA"));
+                    extra = true;
+                }
+                assertTrue("Test Timed out after 60 seconds only processed " + responses + " out of " + reqs, (System.currentTimeMillis() - start) < 60000);
+                selector.poll(10000L); // 10 second timeout
                 if (responses >= 100 && renegotiates == 0) {
                     renegotiates++;
                     server.renegotiate();
@@ -112,7 +125,9 @@ public class SslSelectorTest extends SelectorTest {
 
                 // handle any responses we may have gotten
                 for (NetworkReceive receive : selector.completedReceives()) {
-                    String[] pieces = asString(receive).split("-");
+                    String recv = asString(receive);
+                    log.info("RECV {}", recv);
+                    String[] pieces = recv.split("-");
                     assertEquals("Should be in the form 'conn-counter'", 2, pieces.length);
                     assertEquals("Check the source", receive.source(), pieces[0]);
                     assertEquals("Check that the receive has kindly been rewound", 0, receive.payload().position());
@@ -122,6 +137,7 @@ public class SslSelectorTest extends SelectorTest {
 
                 // prepare new sends for the next round
                 for (int i = 0; i < selector.completedSends().size() && requests < reqs && selector.isChannelReady(node); i++, requests++) {
+                    log.info("SEND {}-{}", node, requests);
                     selector.send(createSend(node, node + "-" + requests));
                 }
             }

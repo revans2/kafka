@@ -28,11 +28,14 @@ import java.util.Map;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * A simple server that takes size delimited byte arrays and just echos them back to the sender.
  */
 class EchoServer extends Thread {
+    private final Logger log = LoggerFactory.getLogger(getClass());
     public final int port;
     private final ServerSocket serverSocket;
     private final List<Thread> threads;
@@ -59,6 +62,7 @@ class EchoServer extends Thread {
 
     public void renegotiate() {
         renegotiate.set(true);
+        log.info("Renegotiate true");
     }
 
     @Override
@@ -77,13 +81,22 @@ class EchoServer extends Thread {
                                 int size = input.readInt();
                                 if (renegotiate.get()) {
                                     renegotiate.set(false);
+                                    log.info("Renegotiate false");
+                                    try {
+                                        Thread.sleep(500);
+                                    } catch (Exception e) {
+                                        //ignored
+                                    }
                                     ((SSLSocket) socket).startHandshake();
                                 }
                                 byte[] bytes = new byte[size];
                                 input.readFully(bytes);
+                                String tmp = new String(bytes);
+                                log.info("Read {} bytes {}", size, tmp);
                                 output.writeInt(size);
                                 output.write(bytes);
                                 output.flush();
+                                log.info("Wrote {} bytes {}", size, tmp);
                             }
                         } catch (IOException e) {
                             // ignore
